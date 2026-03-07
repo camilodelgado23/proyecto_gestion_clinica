@@ -7,7 +7,7 @@ import uuid
 # ==========================
 # CONFIG GENERAL
 # ==========================
-API_URL = "https://gestion-clinica-backend-b7w6.onrender.com"
+API_URL = "https://gestion-clinica-dashboard.onrender.com"
 
 st.set_page_config(page_title="Dashboard Clínica", layout="wide")
 st.title("Dashboard de Gestión Clínica")
@@ -103,13 +103,11 @@ if obs_df is None:
 is_admin = "serialized_data" in patients_df.columns
 
 if not is_admin:
-
     if alerts_df is not None and "patient_id" in alerts_df.columns or \
        (alerts_df is not None and alerts_df.empty and len(patients_df) > 1):
         is_medico = True
         is_patient = False
     elif len(patients_df) == 1 and alerts_df is not None and alerts_df.empty:
-
         if "is_abnormal" in obs_df.columns:
             is_medico = True
             is_patient = False
@@ -203,17 +201,27 @@ if is_medico and alerts_df is not None and not alerts_df.empty:
 # CREAR OBSERVACION
 # ==========================
 
+# Unidades automáticas por signo vital
+UNITS_MAP = {
+    "heart_rate":         "bpm",
+    "temperature":        "°C",
+    "glucose":            "mg/dL",
+    "platelets":          "per µL",
+    "systolic_pressure":  "mmHg",
+    "diastolic_pressure": "mmHg",
+}
+
 if is_medico or is_admin:
     st.subheader("Nueva Observación")
     with st.form("new_obs"):
         col1, col2 = st.columns(2)
         code = col1.selectbox(
             "Signo Vital",
-            ["heart_rate", "temperature", "glucose",
-             "platelets", "systolic_pressure", "diastolic_pressure"]
+            list(UNITS_MAP.keys())
         )
         value = col2.number_input("Valor", step=0.1)
-        unit = st.text_input("Unidad")
+        # Unidad se llena automáticamente según el signo vital
+        unit = st.text_input("Unidad", value=UNITS_MAP.get(code, ""), disabled=True)
         submit = st.form_submit_button("Guardar")
 
         if submit:
@@ -232,7 +240,7 @@ if is_medico or is_admin:
                     "patient_id": selected_patient,
                     "code": code,
                     "value": value,
-                    "unit": unit
+                    "unit": UNITS_MAP.get(code, unit)
                 }
                 r = requests.post(
                     f"{API_URL}/fhir/Observation",
@@ -257,12 +265,12 @@ if is_admin or is_medico:
         col1, col2 = st.columns(2)
         edit_code = col1.selectbox(
             "Signo Vital",
-            ["heart_rate", "temperature", "glucose",
-             "platelets", "systolic_pressure", "diastolic_pressure"],
+            list(UNITS_MAP.keys()),
             key="edit_code"
         )
         edit_value = col2.number_input("Nuevo Valor", step=0.1, key="edit_value")
-        edit_unit = st.text_input("Unidad", key="edit_unit")
+        # Unidad se llena automáticamente según el signo vital
+        edit_unit = st.text_input("Unidad", value=UNITS_MAP.get(edit_code, ""), disabled=True, key="edit_unit")
         update_btn = st.form_submit_button("Actualizar Observación")
 
         if update_btn:
@@ -270,7 +278,7 @@ if is_admin or is_medico:
                 "patient_id": selected_patient,
                 "code": edit_code,
                 "value": edit_value,
-                "unit": edit_unit
+                "unit": UNITS_MAP.get(edit_code, edit_unit)
             }
             r = requests.put(
                 f"{API_URL}/fhir/Observation/{int(obs_id)}",
@@ -366,55 +374,39 @@ if is_admin:
     with st.form("edit_patient"):
         p_id = st.text_input("ID Paciente a editar")
         col1, col2 = st.columns(2)
-        new_given = col1.text_input("Nuevo Nombre")
-        new_family = col2.text_input("Nuevo Apellido")
+        new_given = col1.text_input("Nombre")
+        new_family = col2.text_input("Apellido")
         col3, col4 = st.columns(2)
-        new_gender = col3.selectbox(
-            "Nuevo Genero",
-            ["", "male", "female", "other"]
-        )
-        new_birth = col4.text_input("Nueva Fecha Nacimiento (YYYY-MM-DD)")
-        new_summary = st.text_area("Nuevo Medical Summary")
-        new_patient_key = st.text_input(
-            "Nueva Patient Key",
-            help="Déjala vacía para mantener la key actual del paciente."
-        )
+        new_gender = col3.selectbox("Genero", ["male", "female", "other"])
+        new_birth = col4.text_input("Nacimiento (YYYY-MM-DD)")
+        new_summary = st.text_area("Medical Summary")
+        new_patient_key = st.text_input("Patient Key")
         update_p_btn = st.form_submit_button("Actualizar Paciente")
 
         if update_p_btn:
-            if not p_id:
-                st.error("Debes ingresar el ID del paciente")
+            if not all([p_id, new_given, new_family, new_birth, new_patient_key]):
+                st.error("Todos los campos son obligatorios para editar")
             else:
-                r_get = requests.get(
+                payload = {
+                    "id": p_id,
+                    "given_name": new_given.strip(),
+                    "family_name": new_family.strip(),
+                    "gender": new_gender,
+                    "birthDate": new_birth.strip(),
+                    "medical_summary": new_summary.strip(),
+                    "patient_key": new_patient_key.strip()
+                }
+                r = requests.put(
                     f"{API_URL}/fhir/Patient/{p_id}",
-                    headers=HEADERS
+                    headers=HEADERS,
+                    json=payload
                 )
-                if r_get.status_code != 200:
-                    st.error(f"Paciente no encontrado: {r_get.text}")
+                if r.status_code == 200:
+                    st.success("✅ Paciente actualizado")
+                    st.cache_data.clear()
+                    st.rerun()
                 else:
-                    current = r_get.json()
-
-                    resolved_key = new_patient_key.strip() if new_patient_key.strip() else current.get("patient_key", "")
-                    payload = {
-                        "id": p_id,
-                        "given_name": new_given.strip() or current.get("given_name", ""),
-                        "family_name": new_family.strip() or current.get("family_name", ""),
-                        "gender": new_gender if new_gender else current.get("gender", ""),
-                        "birthDate": new_birth.strip() or str(current.get("birth_date", "")),
-                        "medical_summary": new_summary.strip() or current.get("medical_summary", ""),
-                        "patient_key": resolved_key
-                    }
-                    r = requests.put(
-                        f"{API_URL}/fhir/Patient/{p_id}",
-                        headers=HEADERS,
-                        json=payload
-                    )
-                    if r.status_code == 200:
-                        st.success("Paciente actualizado")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error(f"Error {r.status_code}: {r.text}")
+                    st.error(f"Error {r.status_code}: {r.text}")
 
 # ==========================
 # ELIMINAR PACIENTE (ADMIN)
@@ -445,7 +437,6 @@ if "total" in obs_df.columns:
     st.subheader("Conteo Observaciones")
     st.dataframe(obs_df)
     st.stop()
-
 
 if is_patient:
     patient_obs = obs_df.copy()
