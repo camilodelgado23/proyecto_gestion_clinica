@@ -60,11 +60,13 @@ def fetch_patients(access_key, permission_key):
             headers=headers,
             timeout=30
         )
+        if r.status_code == 401 or r.status_code == 403:
+            return "credenciales_invalidas", None
         if r.status_code != 200:
-            return None
-        return pd.DataFrame(r.json()["data"])
+            return "error_servidor", None
+        return "ok", pd.DataFrame(r.json()["data"])
     except Exception:
-        return None
+        return "sin_conexion", None
 
 
 @st.cache_data(ttl=15)
@@ -88,22 +90,29 @@ def fetch_observations(access_key, permission_key):
     except Exception:
         return None, None
 
-
 # ==========================
 # CARGAR DATOS
 # ==========================
 
-patients_df = fetch_patients(access_key, permission_key)
+status, patients_df = fetch_patients(access_key, permission_key)
 obs_df, alerts_df = fetch_observations(access_key, permission_key)
 
-if patients_df is None or patients_df.empty:
+if status == "credenciales_invalidas":
+    st.error("❌ Credenciales incorrectas. Verifica tu Access Key y Permission Key.")
+    st.session_state.auth = False
+    st.stop()
+
+if status == "sin_conexion":
     st.error("⚠️ No se pudo conectar con el backend.")
-    st.info("💤 El servidor puede estar iniciando (plan gratuito de Render). Espera 30 segundos y recarga la página.")
+    st.info("💤 El servidor puede estar iniciando. Espera 30 segundos y recarga la página.")
+    st.stop()
+
+if status == "error_servidor" or patients_df is None or patients_df.empty:
+    st.error("⚠️ Error al cargar los datos. Intenta recargar la página.")
     st.stop()
 
 if obs_df is None:
-    st.error("⚠️ No se pudieron cargar las observaciones.")
-    st.info("💤 El servidor puede estar iniciando. Espera 30 segundos y recarga la página.")
+    st.error("⚠️ No se pudieron cargar las observaciones. Intenta recargar la página.")
     st.stop()
 
 # ==========================
