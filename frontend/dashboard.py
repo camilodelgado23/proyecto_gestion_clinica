@@ -7,7 +7,7 @@ import uuid
 # ==========================
 # CONFIG GENERAL
 # ==========================
-API_URL = "https://gestion-clinica-dashboard.onrender.com"
+API_URL = "https://gestion-clinica-backend-b7w6.onrender.com"
 
 st.set_page_config(page_title="Dashboard Clínica", layout="wide")
 st.title("Dashboard de Gestión Clínica")
