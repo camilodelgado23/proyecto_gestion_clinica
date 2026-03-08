@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import uuid
 
 # ==========================
@@ -21,12 +22,9 @@ if "auth" not in st.session_state:
 
 with st.sidebar.form("login_form"):
     st.header("Login")
-
     access_key_input = st.text_input("Access Key", type="password")
     permission_key_input = st.text_input("Permission Key", type="password")
-
     submitted = st.form_submit_button("Ingresar")
-
     if submitted:
         st.session_state.access_key = access_key_input
         st.session_state.permission_key = permission_key_input
@@ -217,10 +215,9 @@ if is_medico and alerts_df is not None and not alerts_df.empty:
             st.warning(f"{a['code']} = {a['value']} → {a['message']}")
 
 # ==========================
-# CREAR OBSERVACION
+# UNIDADES AUTOMATICAS
 # ==========================
 
-# Unidades automáticas por signo vital
 UNITS_MAP = {
     "heart_rate":         "bpm",
     "temperature":        "°C",
@@ -230,223 +227,181 @@ UNITS_MAP = {
     "diastolic_pressure": "mmHg",
 }
 
+# ==========================
+# GESTIÓN DE OBSERVACIONES
+# ==========================
+
 if is_medico or is_admin:
-    st.subheader("Nueva Observación")
-    with st.form("new_obs"):
-        col1, col2 = st.columns(2)
-        code = col1.selectbox(
-            "Signo Vital",
-            list(UNITS_MAP.keys())
-        )
-        value = col2.number_input("Valor", step=0.1)
-        # Unidad se llena automáticamente según el signo vital
-        unit = st.text_input("Unidad", value=UNITS_MAP.get(code, ""), disabled=True)
-        submit = st.form_submit_button("Guardar")
+    st.markdown("---")
+    st.markdown("## 🩺 Gestión de Observaciones")
 
-        if submit:
-            impossible = False
-            if code == "temperature" and value > 45:
-                impossible = True
-            if code == "heart_rate" and value > 250:
-                impossible = True
-            if code == "systolic_pressure" and value > 350:
-                impossible = True
+    with st.expander("➕ Nueva Observación", expanded=False):
+        with st.form("new_obs"):
+            col1, col2 = st.columns(2)
+            code = col1.selectbox("Signo Vital", list(UNITS_MAP.keys()))
+            value = col2.number_input("Valor", step=0.1)
+            unit = st.text_input("Unidad", value=UNITS_MAP.get(code, ""), disabled=True)
+            submit = st.form_submit_button("Guardar")
 
-            if impossible:
-                st.error("Valor clínicamente imposible")
-            else:
+            if submit:
+                impossible = False
+                if code == "temperature" and value > 45:
+                    impossible = True
+                if code == "heart_rate" and value > 250:
+                    impossible = True
+                if code == "systolic_pressure" and value > 350:
+                    impossible = True
+
+                if impossible:
+                    st.error("Valor clínicamente imposible")
+                else:
+                    payload = {
+                        "patient_id": selected_patient,
+                        "code": code,
+                        "value": value,
+                        "unit": UNITS_MAP.get(code, unit)
+                    }
+                    r = requests.post(f"{API_URL}/fhir/Observation", headers=HEADERS, json=payload)
+                    if r.status_code == 200:
+                        st.success("✅ Observación creada")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(r.text)
+
+    with st.expander("✏️ Editar Observación", expanded=False):
+        with st.form("edit_obs"):
+            obs_id = st.number_input("ID de la Observación", min_value=1, step=1)
+            col1, col2 = st.columns(2)
+            edit_code = col1.selectbox("Signo Vital", list(UNITS_MAP.keys()), key="edit_code")
+            edit_value = col2.number_input("Nuevo Valor", step=0.1, key="edit_value")
+            edit_unit = st.text_input("Unidad", value=UNITS_MAP.get(edit_code, ""), disabled=True, key="edit_unit")
+            update_btn = st.form_submit_button("Actualizar Observación")
+
+            if update_btn:
                 payload = {
                     "patient_id": selected_patient,
-                    "code": code,
-                    "value": value,
-                    "unit": UNITS_MAP.get(code, unit)
+                    "code": edit_code,
+                    "value": edit_value,
+                    "unit": UNITS_MAP.get(edit_code, edit_unit)
                 }
-                r = requests.post(
-                    f"{API_URL}/fhir/Observation",
-                    headers=HEADERS,
-                    json=payload
-                )
+                r = requests.put(f"{API_URL}/fhir/Observation/{int(obs_id)}", headers=HEADERS, json=payload)
                 if r.status_code == 200:
-                    st.success("Observación creada")
+                    st.success("✅ Observación actualizada")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error(r.text)
+
+    with st.expander("🗑️ Eliminar Observación", expanded=False):
+        with st.form("delete_obs"):
+            delete_id = st.number_input("ID eliminar", min_value=1, step=1)
+            del_btn = st.form_submit_button("Eliminar Observación")
+            if del_btn:
+                r = requests.delete(f"{API_URL}/fhir/Observation/{int(delete_id)}", headers=HEADERS)
+                if r.status_code == 200:
+                    st.success("✅ Observación eliminada")
                     st.cache_data.clear()
                     st.rerun()
                 else:
                     st.error(r.text)
 
 # ==========================
-# EDITAR OBSERVACION
+# GESTIÓN DE PACIENTES
 # ==========================
 
 if is_admin or is_medico:
-    st.subheader("Editar Observación")
-    with st.form("edit_obs"):
-        obs_id = st.number_input("ID de la Observación", min_value=1, step=1)
-        col1, col2 = st.columns(2)
-        edit_code = col1.selectbox(
-            "Signo Vital",
-            list(UNITS_MAP.keys()),
-            key="edit_code"
-        )
-        edit_value = col2.number_input("Nuevo Valor", step=0.1, key="edit_value")
-        # Unidad se llena automáticamente según el signo vital
-        edit_unit = st.text_input("Unidad", value=UNITS_MAP.get(edit_code, ""), disabled=True, key="edit_unit")
-        update_btn = st.form_submit_button("Actualizar Observación")
+    st.markdown("---")
+    st.markdown("## 👤 Gestión de Pacientes")
 
-        if update_btn:
-            payload = {
-                "patient_id": selected_patient,
-                "code": edit_code,
-                "value": edit_value,
-                "unit": UNITS_MAP.get(edit_code, edit_unit)
-            }
-            r = requests.put(
-                f"{API_URL}/fhir/Observation/{int(obs_id)}",
-                headers=HEADERS,
-                json=payload
+    with st.expander("➕ Crear Paciente", expanded=False):
+        with st.form("create_patient"):
+            col1, col2 = st.columns(2)
+            given = col1.text_input("Nombre")
+            family = col2.text_input("Apellido")
+            col3, col4 = st.columns(2)
+            gender = col3.selectbox("Genero", ["male", "female", "other"])
+            birth = col4.text_input("Nacimiento (YYYY-MM-DD)")
+            medical_summary = st.text_area("Medical Summary")
+            patient_key_input = st.text_input(
+                "Patient Key",
+                help="Clave que usará el paciente para iniciar sesión. Si la dejas vacía se genera automáticamente."
             )
-            if r.status_code == 200:
-                st.success("Observación actualizada")
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.error(r.text)
+            submit = st.form_submit_button("Crear Paciente")
 
-# ==========================
-# ELIMINAR OBSERVACION
-# ==========================
-
-if is_admin or is_medico:
-    st.subheader("Eliminar Observación")
-    with st.form("delete_obs"):
-        delete_id = st.number_input("ID eliminar", min_value=1, step=1)
-        del_btn = st.form_submit_button("Eliminar Observación")
-        if del_btn:
-            r = requests.delete(
-                f"{API_URL}/fhir/Observation/{int(delete_id)}",
-                headers=HEADERS
-            )
-            if r.status_code == 200:
-                st.success("Observación eliminada")
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.error(r.text)
-
-# ==========================
-# CREAR PACIENTE
-# ==========================
-
-if is_admin or is_medico:
-    st.subheader("Crear Paciente")
-    with st.form("create_patient"):
-        col1, col2 = st.columns(2)
-        given = col1.text_input("Nombre")
-        family = col2.text_input("Apellido")
-        col3, col4 = st.columns(2)
-        gender = col3.selectbox("Genero", ["male", "female", "other"])
-        birth = col4.text_input("Nacimiento (YYYY-MM-DD)")
-        medical_summary = st.text_area("Medical Summary")
-        patient_key_input = st.text_input(
-            "Patient Key",
-            help="Clave que usará el paciente para iniciar sesión. Si la dejas vacía se genera automáticamente."
-        )
-        submit = st.form_submit_button("Crear Paciente")
-
-        if submit:
-            if not given or not family or not birth:
-                st.error("Todos los campos son obligatorios")
-            else:
-                patient_id = f"pac-{uuid.uuid4().hex[:8]}"
-                patient_key = patient_key_input.strip() if patient_key_input.strip() else uuid.uuid4().hex
-
-                payload = {
-                    "id": patient_id,
-                    "given_name": given,
-                    "family_name": family,
-                    "gender": gender,
-                    "birthDate": birth,
-                    "medical_summary": medical_summary,
-                    "patient_key": patient_key
-                }
-                r = requests.post(
-                    f"{API_URL}/fhir/Patient",
-                    headers=HEADERS,
-                    json=payload
-                )
-                if r.status_code == 200:
-                    st.success("✅ Paciente creado correctamente")
-                    # Mostrar credenciales generadas para el paciente
-                    st.info("🔑 Guarda estas credenciales para el paciente:")
-                    st.code(f"ID del paciente:  {patient_id}\nPatient Key:      {patient_key}", language="text")
-                    st.warning("⚠️ Esta key no se volverá a mostrar. Cópiala ahora.")
-                    st.cache_data.clear()
+            if submit:
+                if not given or not family or not birth:
+                    st.error("Todos los campos son obligatorios")
                 else:
-                    st.error("Error al crear paciente")
-                    st.write(r.status_code, r.text)
-
-# ==========================
-# EDITAR PACIENTE (ADMIN)
-# ==========================
+                    patient_id = f"pac-{uuid.uuid4().hex[:8]}"
+                    patient_key = patient_key_input.strip() if patient_key_input.strip() else uuid.uuid4().hex
+                    payload = {
+                        "id": patient_id,
+                        "given_name": given,
+                        "family_name": family,
+                        "gender": gender,
+                        "birthDate": birth,
+                        "medical_summary": medical_summary,
+                        "patient_key": patient_key
+                    }
+                    r = requests.post(f"{API_URL}/fhir/Patient", headers=HEADERS, json=payload)
+                    if r.status_code == 200:
+                        st.success("✅ Paciente creado correctamente")
+                        st.info("🔑 Guarda estas credenciales para el paciente:")
+                        st.code(f"ID del paciente:  {patient_id}\nPatient Key:      {patient_key}", language="text")
+                        st.warning("⚠️ Esta key no se volverá a mostrar. Cópiala ahora.")
+                        st.cache_data.clear()
+                    else:
+                        st.error("Error al crear paciente")
+                        st.write(r.status_code, r.text)
 
 if is_admin:
-    st.subheader("Editar Paciente")
-    with st.form("edit_patient"):
-        p_id = st.text_input("ID Paciente a editar")
-        col1, col2 = st.columns(2)
-        new_given = col1.text_input("Nombre")
-        new_family = col2.text_input("Apellido")
-        col3, col4 = st.columns(2)
-        new_gender = col3.selectbox("Genero", ["male", "female", "other"])
-        new_birth = col4.text_input("Nacimiento (YYYY-MM-DD)")
-        new_summary = st.text_area("Medical Summary")
-        new_patient_key = st.text_input("Patient Key")
-        update_p_btn = st.form_submit_button("Actualizar Paciente")
+    with st.expander("✏️ Editar Paciente", expanded=False):
+        with st.form("edit_patient"):
+            p_id = st.text_input("ID Paciente a editar")
+            col1, col2 = st.columns(2)
+            new_given = col1.text_input("Nombre")
+            new_family = col2.text_input("Apellido")
+            col3, col4 = st.columns(2)
+            new_gender = col3.selectbox("Genero", ["male", "female", "other"])
+            new_birth = col4.text_input("Nacimiento (YYYY-MM-DD)")
+            new_summary = st.text_area("Medical Summary")
+            new_patient_key = st.text_input("Patient Key")
+            update_p_btn = st.form_submit_button("Actualizar Paciente")
 
-        if update_p_btn:
-            if not all([p_id, new_given, new_family, new_birth, new_patient_key]):
-                st.error("Todos los campos son obligatorios para editar")
-            else:
-                payload = {
-                    "id": p_id,
-                    "given_name": new_given.strip(),
-                    "family_name": new_family.strip(),
-                    "gender": new_gender,
-                    "birthDate": new_birth.strip(),
-                    "medical_summary": new_summary.strip(),
-                    "patient_key": new_patient_key.strip()
-                }
-                r = requests.put(
-                    f"{API_URL}/fhir/Patient/{p_id}",
-                    headers=HEADERS,
-                    json=payload
-                )
+            if update_p_btn:
+                if not all([p_id, new_given, new_family, new_birth, new_patient_key]):
+                    st.error("Todos los campos son obligatorios para editar")
+                else:
+                    payload = {
+                        "id": p_id,
+                        "given_name": new_given.strip(),
+                        "family_name": new_family.strip(),
+                        "gender": new_gender,
+                        "birthDate": new_birth.strip(),
+                        "medical_summary": new_summary.strip(),
+                        "patient_key": new_patient_key.strip()
+                    }
+                    r = requests.put(f"{API_URL}/fhir/Patient/{p_id}", headers=HEADERS, json=payload)
+                    if r.status_code == 200:
+                        st.success("✅ Paciente actualizado")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"Error {r.status_code}: {r.text}")
+
+    with st.expander("🗑️ Eliminar Paciente", expanded=False):
+        with st.form("delete_patient"):
+            p_del = st.text_input("ID eliminar")
+            del_p_btn = st.form_submit_button("Eliminar Paciente")
+            if del_p_btn:
+                r = requests.delete(f"{API_URL}/fhir/Patient/{p_del}", headers=HEADERS)
                 if r.status_code == 200:
-                    st.success("✅ Paciente actualizado")
+                    st.success("✅ Paciente eliminado")
                     st.cache_data.clear()
                     st.rerun()
                 else:
-                    st.error(f"Error {r.status_code}: {r.text}")
-
-# ==========================
-# ELIMINAR PACIENTE (ADMIN)
-# ==========================
-
-if is_admin:
-    st.subheader("Eliminar Paciente")
-    with st.form("delete_patient"):
-        p_del = st.text_input("ID eliminar")
-        del_p_btn = st.form_submit_button("Eliminar Paciente")
-        if del_p_btn:
-            r = requests.delete(
-                f"{API_URL}/fhir/Patient/{p_del}",
-                headers=HEADERS
-            )
-            if r.status_code == 200:
-                st.success("Paciente eliminado")
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.error(r.text)
+                    st.error(r.text)
 
 # ==========================
 # FILTRAR OBSERVACIONES
@@ -457,6 +412,7 @@ if "total" in obs_df.columns:
     st.dataframe(obs_df)
     st.stop()
 
+if is_patient:
     patient_obs = obs_df.copy()
 elif "patient_id" in obs_df.columns:
     patient_obs = obs_df[obs_df["patient_id"] == selected_patient].copy()
@@ -495,9 +451,9 @@ patient_obs["outlier"] = patient_obs.apply(
 # GRAFICAS
 # ==========================
 
-st.subheader("Tendencias")
+st.markdown("---")
+st.subheader("📈 Tendencias")
 
-# Rangos normales para marcar puntos anormales en gráfica (solo médico)
 NORMAL_RANGES = {
     "heart_rate":         (60, 100),
     "temperature":        (36, 37.5),
@@ -507,15 +463,12 @@ NORMAL_RANGES = {
     "diastolic_pressure": (60, 80),
 }
 
-import plotly.graph_objects as go
-
 for code in patient_obs["code"].unique():
     df = patient_obs[patient_obs["code"] == code].sort_values("created_at").copy()
 
     fig = px.line(df, x="created_at", y="value_num", title=code, markers=True)
     fig.update_traces(marker=dict(size=8, color="#2196F3"), line=dict(color="#2196F3"))
 
-    # Puntos rojos SOLO para médico
     if is_medico and code in NORMAL_RANGES:
         lo, hi = NORMAL_RANGES[code]
         abnormal = df[(df["value_num"] < lo) | (df["value_num"] > hi)]
@@ -536,7 +489,7 @@ for code in patient_obs["code"].unique():
 # ==========================
 
 if is_medico:
-    st.subheader("Mapa Calor")
+    st.subheader("🌡️ Mapa de Calor")
     heat_df = patient_obs.pivot_table(
         index="created_at",
         columns="code",
@@ -550,7 +503,7 @@ if is_medico:
 # TABLA RESUMEN
 # ==========================
 
-st.subheader("Resumen Observaciones")
+st.subheader("📋 Resumen de Observaciones")
 
 cols = [
     c for c in
