@@ -490,12 +490,17 @@ for code in patient_obs["code"].unique():
 
 if is_medico:
     st.subheader("🌡️ Mapa de Calor")
-    heat_df = patient_obs.pivot_table(
-        index="created_at",
+    
+    heat_df = patient_obs.copy()
+    heat_df["fecha"] = heat_df["created_at"].dt.date  # ← solo fecha sin hora
+    
+    heat_df = heat_df.pivot_table(
+        index="fecha",
         columns="code",
         values="value_num",
         aggfunc="mean"
     )
+
     fig = px.imshow(heat_df, aspect="auto")
     st.plotly_chart(fig, use_container_width=True)
 
